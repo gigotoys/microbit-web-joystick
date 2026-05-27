@@ -343,7 +343,7 @@
             if (cmd !== lastCommand) {
                 const cmdMap = { 'F': 'F (前進)', 'B': 'B (後退)', 'L': 'L (左轉)', 'R': 'R (右轉)', 'S': 'S (停止)' };
                 cmdValDisplay.innerText = cmdMap[cmd];
-                sendBluetoothData(cmd + '\n'); 
+                sendBluetoothData(cmd); 
                 lastCommand = cmd;
             }
         }
@@ -353,13 +353,13 @@
             const cmdStr = `L${leftSliderVal} R${rightSliderVal}`;
             if (cmdStr !== lastSliderCmd) {
                 cmdValDisplay.innerText = cmdStr;
-                sendBluetoothData(cmdStr + '\n');
+                sendBluetoothData(cmdStr);
                 lastSliderCmd = cmdStr;
             }
         }
 
         // ==========================================
-        // 3. Web Bluetooth API 連線架構 (優化 Queue 與寫入防鎖定)
+        // 3. Web Bluetooth API 連線架構 (自定義 "#" 作為資料邊界符)
         // ==========================================
         const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
         const UART_TX_CHARACTERISTIC_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; 
@@ -401,7 +401,7 @@
                 txCharacteristic = await service.getCharacteristic(UART_TX_CHARACTERISTIC_UUID);
 
                 updateBluetoothUI(true);
-                sendBluetoothData('S\n');
+                sendBluetoothData('S');
 
             } catch (error) {
                 console.error("藍牙連線錯誤:", error);
@@ -434,19 +434,19 @@
             }
         }
 
-        // --- 核心改進：防止同時寫入的發送序列與無回傳模式 ---
+        // --- 防止同時寫入的發送序列 ---
         let isWriting = false;
         let pendingMessage = null;
 
         async function sendBluetoothData(dataString) {
-            const cleanData = dataString.trim() + "\r\n"; // 同時補上 \r\n，強化相容性
+            // ⚡ 關鍵修正：不再使用 \r\n，改用極度可靠的 "#" 字元作為一筆資料的結尾
+            const cleanData = dataString.trim() + "#"; 
 
             if (!txCharacteristic) {
-                console.log("[藍牙未連接 - 模擬發送]:", cleanData.replace('\r', '\\r').replace('\n', '\\n'));
+                console.log("[藍牙未連接 - 模擬發送]:", cleanData);
                 return;
             }
 
-            // 如果目前正在傳送中，將這筆最新資料存入待傳區，並直接回傳
             if (isWriting) {
                 pendingMessage = cleanData;
                 return;
@@ -457,19 +457,17 @@
                 const encoder = new TextEncoder();
                 const data = encoder.encode(cleanData);
 
-                // 優先使用 writeValueWithoutResponse (不需等待 micro:bit 確認，傳送速度極快，且絕不塞車鎖定)
+                // 優先使用不回傳確認的寫入方式，效能最好且絕不卡死
                 if (txCharacteristic.writeValueWithoutResponse) {
                     await txCharacteristic.writeValueWithoutResponse(data);
                 } else {
-                    // 備用寫入方法 (若瀏覽器較舊)
                     await txCharacteristic.writeValue(data);
                 }
-                console.log("實際已發送:", cleanData.replace('\r', '\\r').replace('\n', '\\n'));
+                console.log("實際已發送:", cleanData);
             } catch (error) {
                 console.error("發送資料失敗:", error);
             } finally {
                 isWriting = false;
-                // 如果在傳送期間有新的未傳訊息，立刻補傳最新的一筆
                 if (pendingMessage !== null) {
                     const nextMsg = pendingMessage;
                     pendingMessage = null;
@@ -486,12 +484,12 @@
 
         function handleButtonPress(btnName) {
             cmdValDisplay.innerText = `${btnName} 鍵 (按下)`;
-            sendBluetoothData(`BTN_${btnName}_DOWN\n`);
+            sendBluetoothData(`BTN_${btnName}_DOWN`);
         }
 
         function handleButtonRelease(btnName) {
             cmdValDisplay.innerText = `${btnName} 鍵 (放開)`;
-            sendBluetoothData(`BTN_${btnName}_UP\n`);
+            sendBluetoothData(`BTN_${btnName}_UP`);
             
             setTimeout(() => {
                 if (isSliderMode) {
