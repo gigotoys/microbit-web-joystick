@@ -324,45 +324,30 @@
     // 傳送資料
     // ==========================================
 
-    async function sendBluetoothData(dataString) {
-
-        if (!rxCharacteristic) {
-
-            console.log(
-                '[未連線]',
-                dataString.trim()
-            );
-
-            return;
+  // 修改後的發送函式，增加對特徵值的檢查
+async function sendBluetoothData(dataString) {
+    if (!txCharacteristic) {
+        console.warn("藍牙未連線，無法發送:", dataString);
+        return;
+    }
+    try {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(dataString);
+        // 使用 writeValueWithoutResponse，對於 micro:bit UART 通常更穩定且速度更快
+        if (txCharacteristic.writeValueWithoutResponse) {
+            await txCharacteristic.writeValueWithoutResponse(data);
+        } else {
+            await txCharacteristic.writeValue(data);
         }
-
-        try {
-
-            const encoder =
-                new TextEncoder();
-
-            const data =
-                encoder.encode(dataString);
-
-            await rxCharacteristic
-                .writeValueWithoutResponse(data);
-
-            console.log(
-                '已發送:',
-                dataString.trim()
-            );
-
-        }
-        catch (error) {
-
-            console.error(
-                '發送資料失敗:',
-                error
-            );
+        console.log("已發送:", dataString.trim());
+    } catch (error) {
+        console.error("發送資料失敗 (GATT Error):", error);
+        // 如果失敗，嘗試斷開連接重新連線
+        if (error.name === 'NotSupportedError' || error.name === 'NetworkError') {
+            onDisconnected();
         }
     }
-
-
+}
     // ==========================================
     // 搖桿
     // ==========================================
