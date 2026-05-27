@@ -445,7 +445,7 @@ async function sendBluetoothData(dataString) {
         const cleanData = dataString.trim() + "\r\n"; 
         const encoder = new TextEncoder();
         const data = encoder.encode(cleanData);
-        await txCharacteristic.writeValue(data);
+        await txCharacteristic.writeValueWithResponse(data);
         console.log("實際已發送:", cleanData.replace('\r', '\\r').replace('\n', '\\n'));
     } catch (error) {
         console.error("發送資料失敗:", error);
