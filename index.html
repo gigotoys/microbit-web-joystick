@@ -359,7 +359,7 @@
         }
 
         // ==========================================
-        // 3. Web Bluetooth API 連線架構 (micro:bit UART)
+        // 3. Web Bluetooth API 連線架構 (優化 Queue 與寫入防鎖定)
         // ==========================================
         const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
         const UART_TX_CHARACTERISTIC_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; 
@@ -422,7 +422,7 @@
                 btIndicator.classList.remove('bg-red-500', 'shadow-[0_0_8px_#ef4444]');
                 btIndicator.classList.add('bg-green-500', 'shadow-[0_0_8px_#22c55e]');
                 btStatus.innerText = '已連接 micro:bit';
-                connectBtn.innerHTML = '<span>斷開連接</span>';
+                connectBtn.innerHTML = '<span>斷開</span>';
                 connectBtn.classList.replace('bg-blue-600', 'bg-red-600');
                 connectBtn.classList.replace('hover:bg-blue-500', 'hover:bg-red-500');
             } else {
@@ -434,23 +434,49 @@
             }
         }
 
-   // 請在網頁程式碼的 JS 區，將原本的 sendBluetoothData 替換為此版本：
-async function sendBluetoothData(dataString) {
-    if (!txCharacteristic) {
-        console.log("[藍牙未連接 - 模擬發送]:", dataString.trim());
-        return;
-    }
-    try {
-        // 確保結尾同時帶有 \r 和 \n (更相容於 micro:bit)
-        const cleanData = dataString.trim() + "\r\n"; 
-        const encoder = new TextEncoder();
-        const data = encoder.encode(cleanData);
-        await txCharacteristic.writeValueWithResponse(data);
-        console.log("實際已發送:", cleanData.replace('\r', '\\r').replace('\n', '\\n'));
-    } catch (error) {
-        console.error("發送資料失敗:", error);
-    }
-}
+        // --- 核心改進：防止同時寫入的發送序列與無回傳模式 ---
+        let isWriting = false;
+        let pendingMessage = null;
+
+        async function sendBluetoothData(dataString) {
+            const cleanData = dataString.trim() + "\r\n"; // 同時補上 \r\n，強化相容性
+
+            if (!txCharacteristic) {
+                console.log("[藍牙未連接 - 模擬發送]:", cleanData.replace('\r', '\\r').replace('\n', '\\n'));
+                return;
+            }
+
+            // 如果目前正在傳送中，將這筆最新資料存入待傳區，並直接回傳
+            if (isWriting) {
+                pendingMessage = cleanData;
+                return;
+            }
+
+            isWriting = true;
+            try {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(cleanData);
+
+                // 優先使用 writeValueWithoutResponse (不需等待 micro:bit 確認，傳送速度極快，且絕不塞車鎖定)
+                if (txCharacteristic.writeValueWithoutResponse) {
+                    await txCharacteristic.writeValueWithoutResponse(data);
+                } else {
+                    // 備用寫入方法 (若瀏覽器較舊)
+                    await txCharacteristic.writeValue(data);
+                }
+                console.log("實際已發送:", cleanData.replace('\r', '\\r').replace('\n', '\\n'));
+            } catch (error) {
+                console.error("發送資料失敗:", error);
+            } finally {
+                isWriting = false;
+                // 如果在傳送期間有新的未傳訊息，立刻補傳最新的一筆
+                if (pendingMessage !== null) {
+                    const nextMsg = pendingMessage;
+                    pendingMessage = null;
+                    sendBluetoothData(nextMsg);
+                }
+            }
+        }
 
         // ==========================================
         // 4. 右側按鍵邏輯
