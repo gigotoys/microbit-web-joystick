@@ -427,8 +427,7 @@
 
             // ⚡ 重點：
             // 使用 \n 當結尾
-            const finalData =
-                dataString + "\n";
+        const cleanData = dataString.trim() + "\n";
 
             const encoder =
                 new TextEncoder();
@@ -437,8 +436,7 @@
                 encoder.encode(finalData);
 
             // ⚡ micro:bit BLE 最穩定
-            await rxCharacteristic
-                .writeValueWithoutResponse(data);
+           await txCharacteristic.writeValue(data);
 
             console.log(
                 '已發送:',
