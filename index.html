@@ -434,20 +434,23 @@
             }
         }
 
-        async function sendBluetoothData(dataString) {
-            if (!txCharacteristic) {
-                console.log("[藍牙未連接 - 模擬發送]:", dataString.trim());
-                return;
-            }
-            try {
-                const encoder = new TextEncoder();
-                const data = encoder.encode(dataString);
-                await txCharacteristic.writeValue(data);
-                console.log("已發送:", dataString.trim());
-            } catch (error) {
-                console.error("發送資料失敗:", error);
-            }
-        }
+   // 請在網頁程式碼的 JS 區，將原本的 sendBluetoothData 替換為此版本：
+async function sendBluetoothData(dataString) {
+    if (!txCharacteristic) {
+        console.log("[藍牙未連接 - 模擬發送]:", dataString.trim());
+        return;
+    }
+    try {
+        // 確保結尾同時帶有 \r 和 \n (更相容於 micro:bit)
+        const cleanData = dataString.trim() + "\r\n"; 
+        const encoder = new TextEncoder();
+        const data = encoder.encode(cleanData);
+        await txCharacteristic.writeValue(data);
+        console.log("實際已發送:", cleanData.replace('\r', '\\r').replace('\n', '\\n'));
+    } catch (error) {
+        console.error("發送資料失敗:", error);
+    }
+}
 
         // ==========================================
         // 4. 右側按鍵邏輯
