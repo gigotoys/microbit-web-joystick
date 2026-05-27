@@ -349,8 +349,8 @@
         let pendingMessage = null;
 
         async function sendBluetoothData(dataString) {
-            // ⚡ 關鍵修正：不再使用 \r\n，改用極度可靠的 "#" 字元作為一筆資料的結尾
-            const cleanData = dataString.trim() + "#"; 
+            // ⚡ 關鍵修正：使用 \n
+            const cleanData = dataString.trim() + "\n";
             if (!txCharacteristic) {
                 console.log("[藍牙未連接 - 模擬發送]:", cleanData);
                 return;
