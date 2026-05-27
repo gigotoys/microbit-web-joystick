@@ -1,53 +1,131 @@
+// 當藍牙連線成功時顯示打勾圖案
+bluetooth.onBluetoothConnected(function () {
+    basic.showIcon(IconNames.Yes)
+    serial.writeLine("-> [System] 藍牙已連線成功！")
+})
+
+// 當藍牙斷線時顯示打叉圖案
+bluetooth.onBluetoothDisconnected(function () {
+    basic.showIcon(IconNames.No)
+    serial.writeLine("-> [System] 藍牙已斷開連線。")
+})
+
+// ⚡ 核心改進：直接監聽 "#" 自訂定界符，徹底擺脫系統換行轉譯造成指令遺失的問題
+bluetooth.onUartDataReceived("#", function () {
+    // 1. 直接讀取到 "#" 字元為止（不會包含任何 \r 或 \n 隱形字元！）
+    let cmd = bluetooth.uartReadUntil("#")
+    
+    // ⚡ 序列埠除錯：將接收到的乾淨字串長度與內容輸出到電腦
+    serial.writeLine("--- 收到藍牙訊號 ---")
+    serial.writeLine("接收到指令: '" + cmd + "' (長度: " + cmd.length + ")")
+    
+    // 印出每個字元的 ASCII 碼，方便 100% 確保字串純淨度
+    serial.writeString("字元分析: ")
+    for (let j = 0; j < cmd.length; j++) {
+        serial.writeString("[" + cmd.charCodeAt(j) + "]")
+    }
+    serial.writeLine("") // 換行
+    
+    // ⚡ LED 動作提示：每次收到訊號，讓 LED 畫面的最右下角 (4,4) 閃爍一下，代表實體硬體已接收封包
+    led.toggle(4, 4)
+    
+    // 2. 判斷是雙拉霸數值（包含逗號）還是單一數字控制代碼
+    if (cmd.includes(",")) {
+        // 雙拉霸模式：格式為 "左拉霸值,右拉霸值"，例如 "100,-50"
+        let parts = cmd.split(",")
+        let leftSpeed = parseInt(parts[0])
+        let rightSpeed = parseInt(parts[1])
+        serial.writeLine("雙拉霸模式 - 左拉霸: " + leftSpeed + " | 右拉霸: " + rightSpeed)
+        
+        // 簡易在畫面上滾動顯示數值 (或是直接在這裡控制您的馬達晶片)
+        basic.showString("L" + leftSpeed)
+    } else {
+        // 單一控制代碼模式：將指令文字轉為數字代碼
+        let code = parseInt(cmd)
+        serial.writeLine("單一數字代碼: " + code)
+
+        if (code == 1) { // 1 = 前進 (F)
+            basic.showArrow(ArrowNames.North)
+        } else if (code == 2) { // 2 = 後退 (B)
+            basic.showArrow(ArrowNames.South)
+        } else if (code == 3) { // 3 = 左轉 (L)
+            basic.showArrow(ArrowNames.West)
+        } else if (code == 4) { // 4 = 右轉 (R)
+            basic.showArrow(ArrowNames.East)
+        } else if (code == 5) { // 5 = 停止 (S)
+            basic.clearScreen()
+            basic.showLeds(`
+                . . . . .
+                . # # # .
+                . # . # .
+                . # # # .
+                . . . . .
+                `)
+        } else if (code == 6) { // 6 = A 鍵按下
+            basic.showString("A")
+        } else if (code == 7) { // 7 = A 鍵放開
+            basic.clearScreen()
+        } else if (code == 8) { // 8 = B 鍵按下
+            basic.showString("B")
+        } else if (code == 9) { // 9 = B 鍵放開
+            basic.clearScreen()
+        }
+    }
+    
+    // 保持偵錯用閃爍燈亮起/熄滅的間隔
+    basic.pause(50)
+    led.toggle(4, 4)
+})
+
+// 初始化設定
+serial.redirectToUSB()
+bluetooth.startUartService()
+basic.showIcon(IconNames.Heart)
+serial.writeLine("-> [System] micro:bit 已開機，藍牙服務準備中...")
+
+
+第二部分：網頁控制端 (index.html) 程式碼
+
+您可以將下方這段代碼複製存檔為 index.html，並將其部署至您的 GitHub Pages 上。
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Web 虛擬搖桿控制器</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
     <style>
-        /* 避免在觸控搖桿時網頁跟著滑動 */
         body {
             overscroll-behavior-y: contain;
             touch-action: none;
         }
-        
         #joystick-base, #slider-left-base, #slider-right-base {
             box-shadow: inset 0 0 20px rgba(0,0,0,0.5), 0 4px 10px rgba(0,0,0,0.3);
         }
-        
         #joystick-stick, #slider-left-stick, #slider-right-stick {
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), inset 0 -3px 6px rgba(0,0,0,0.2);
-            transition: transform 0.05s linear; /* 平滑拖曳 */
+            transition: transform 0.05s linear;
         }
-        
-        /* 當放開搖桿或拉霸時，增加回彈動畫 */
         .snap-back {
             transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
         }
     </style>
 </head>
 <body class="bg-gray-900 text-white h-[100dvh] w-screen overflow-hidden font-sans select-none touch-none overscroll-none">
-
-    <!-- 主佈局容器：支援直向與橫向 (Landscape) 自動排列 -->
     <div class="w-full h-full max-w-7xl mx-auto flex flex-col landscape:flex-row relative">
-
-        <!-- 資訊與連線狀態區 (直向置頂，橫向置中) -->
+        <!-- 資訊與連線狀態區 -->
         <div class="w-full landscape:w-1/3 flex flex-col items-center justify-start landscape:justify-center pt-2 sm:pt-4 landscape:pt-0 px-2 order-1 landscape:order-2 z-10">
             <div class="text-center w-full max-w-sm">
                 <h1 class="text-xl sm:text-2xl font-bold mb-1 tracking-wider">虛擬搖桿控制器</h1>
                 <p class="text-gray-400 text-[10px] sm:text-xs mb-2">HTML5 + Web Bluetooth API</p>
-                
                 <div class="bg-gray-800 rounded-2xl p-3 sm:p-4 shadow-xl border border-gray-700">
                     <div class="flex items-center justify-between mb-4">
                         <div class="flex items-center space-x-2">
                             <div id="bt-indicator" class="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444]"></div>
                             <span id="bt-status" class="font-medium text-gray-300 text-xs sm:text-sm">未連接藍牙</span>
                         </div>
-                        <button id="connectBtn" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-lg active:scale-95 flex items-center space-x-1 sm:space-x-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-bluetooth shrink-0" viewBox="0 0 16 16">
-                                <path fill-rule="evenodd" d="m8.543 3.948 1.316 1.316L8.543 6.58V3.948Zm0 8.104 1.316-1.316L8.543 9.42v2.632Zm-1.41-4.043L4.275 5.133l.827-.827L7.377 6.58V1.128l4.137 4.136L8.787 8.01l2.745 2.745-4.136 4.137V9.42l-2.276 2.276-.827-.827 2.858-2.86z"/>
-                            </svg>
+                        <button id="connectBtn" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-lg active:scale-95 flex items-center space-x-1">
                             <span>連接</span>
                         </button>
                     </div>
@@ -69,72 +147,48 @@
             </div>
         </div>
 
-        <!-- 搖桿區 (直向絕對定位於左下，橫向居左) -->
+        <!-- 搖桿區 -->
         <div class="absolute bottom-6 left-4 sm:bottom-12 sm:left-12 landscape:static landscape:w-1/3 flex flex-col items-center landscape:items-center justify-end landscape:justify-center order-2 landscape:order-1 z-20">
-            
-            <!-- 模式切換按鈕 (位於旋鈕上方) -->
             <button id="toggle-mode-btn" class="mb-4 sm:mb-6 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-full text-xs font-medium transition-colors shadow-[0_4px_0_#374151] active:shadow-[0_0px_0_#374151] active:translate-y-[4px] border border-gray-600 flex items-center gap-2 select-none touch-none">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M11.5 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3M9.05 3a2.5 2.5 0 0 1 4.9 0H16v1h-2.05a2.5 2.5 0 0 1-4.9 0H0V3zM4.5 7a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3M2.05 8a2.5 2.5 0 0 1 4.9 0H16v1H6.95a2.5 2.5 0 0 1-4.9 0H0V8zm9.45 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m-2.45 1a2.5 2.5 0 0 1 4.9 0H16v1h-2.05a2.5 2.5 0 0 1-4.9 0H0v-1z"/></svg>
                 切換雙拉霸
             </button>
-
-            <!-- 搖桿底座 -->
             <div id="joystick-base" class="relative w-32 h-32 sm:w-48 sm:h-48 bg-gray-800 rounded-full border-4 border-gray-700 flex items-center justify-center shrink-0">
-                <!-- 裝飾用十字線 -->
                 <div class="absolute w-full h-0.5 bg-gray-700 opacity-30"></div>
                 <div class="absolute h-full w-0.5 bg-gray-700 opacity-30"></div>
-                
-                <!-- 搖桿推桿 -->
                 <div id="joystick-stick" class="absolute w-12 h-12 sm:w-20 sm:h-20 bg-gradient-to-br from-gray-500 to-gray-700 rounded-full cursor-pointer z-10 flex items-center justify-center border border-gray-500">
                     <div class="w-6 h-6 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-gray-600 to-gray-800 border border-gray-600 shadow-inner"></div>
                 </div>
             </div>
-
-            <!-- 左拉霸底座 (預設隱藏) -->
             <div id="slider-left-base" class="hidden relative w-16 h-36 sm:w-20 sm:h-52 bg-gray-800 rounded-full border-4 border-gray-700 flex items-center justify-center shrink-0">
-                <!-- 裝飾用中線 -->
                 <div class="absolute h-full w-0.5 bg-gray-700 opacity-30"></div>
-                <!-- 推桿 -->
                 <div id="slider-left-stick" class="absolute w-14 h-14 sm:w-20 sm:h-20 bg-gradient-to-br from-gray-500 to-gray-700 rounded-full cursor-pointer z-10 flex items-center justify-center border border-gray-500">
                     <div class="w-6 h-6 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-gray-600 to-gray-800 border border-gray-600 shadow-inner"></div>
                 </div>
             </div>
         </div>
 
-        <!-- 按鍵區 (直向絕對定位於右下，橫向居右) -->
+        <!-- 按鍵區 -->
         <div class="absolute bottom-6 right-4 sm:bottom-12 sm:right-12 landscape:static landscape:w-1/3 flex items-end landscape:items-center justify-end landscape:pr-12 order-3 landscape:order-3 z-20">
-            
             <div class="flex flex-row items-center gap-6 sm:gap-10">
-                <!-- A/B 按鍵區 (在拉霸左邊) -->
                 <div class="flex flex-col gap-4 sm:gap-6 shrink-0">
-                    <!-- B鍵偏右上 -->
                     <div class="flex justify-end w-full pl-6 sm:pl-12">
-                        <button id="btn-b" class="w-12 h-12 sm:w-16 sm:h-16 bg-red-600 rounded-full shadow-[0_6px_0_#7f1d1d] active:shadow-[0_0px_0_#7f1d1d] active:translate-y-[6px] text-lg sm:text-2xl font-bold text-white transition-all select-none touch-none border border-red-500">B</button>
+                        <button id="btn-b" class="w-12 h-12 sm:w-16 sm:h-16 bg-red-600 rounded-full shadow-[0_6px_0_#7f1d1d] active:shadow-[0_0px_0_#7f1d1d] active:translate-y-[6px] text-lg sm:text-2xl font-bold text-white border border-red-500">B</button>
                     </div>
-                    <!-- A鍵偏左下 -->
                     <div class="flex justify-start w-full pr-6 sm:pr-12">
-                        <button id="btn-a" class="w-12 h-12 sm:w-16 sm:h-16 bg-blue-600 rounded-full shadow-[0_6px_0_#1e3a8a] active:shadow-[0_0px_0_#1e3a8a] active:translate-y-[6px] text-lg sm:text-2xl font-bold text-white transition-all select-none touch-none border border-blue-500">A</button>
+                        <button id="btn-a" class="w-12 h-12 sm:w-16 sm:h-16 bg-blue-600 rounded-full shadow-[0_6px_0_#1e3a8a] active:shadow-[0_0px_0_#1e3a8a] active:translate-y-[6px] text-lg sm:text-2xl font-bold text-white border border-blue-500">A</button>
                     </div>
                 </div>
-
-                <!-- 右拉霸底座 (預設隱藏) -->
                 <div id="slider-right-base" class="hidden relative w-16 h-36 sm:w-20 sm:h-52 bg-gray-800 rounded-full border-4 border-gray-700 flex items-center justify-center shrink-0">
-                    <!-- 裝飾用中線 -->
                     <div class="absolute h-full w-0.5 bg-gray-700 opacity-30"></div>
-                    <!-- 推桿 -->
                     <div id="slider-right-stick" class="absolute w-14 h-14 sm:w-20 sm:h-20 bg-gradient-to-br from-gray-500 to-gray-700 rounded-full cursor-pointer z-10 flex items-center justify-center border border-gray-500">
                         <div class="w-6 h-6 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-gray-600 to-gray-800 border border-gray-600 shadow-inner"></div>
                     </div>
                 </div>
             </div>
         </div>
-
     </div>
 
     <script>
-        // ==========================================
-        // 0. 模式切換邏輯
-        // ==========================================
         let isSliderMode = false;
         const toggleModeBtn = document.getElementById('toggle-mode-btn');
         const joystickBase = document.getElementById('joystick-base');
@@ -144,7 +198,7 @@
         toggleModeBtn.addEventListener('click', () => {
             isSliderMode = !isSliderMode;
             if (isSliderMode) {
-                toggleModeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M4 8a4 4 0 1 1 8 0 4 4 0 0 1-8 0z"/></svg> 切換單搖桿';
+                toggleModeBtn.innerHTML = '切換單搖桿';
                 joystickBase.classList.add('hidden');
                 sliderLeftBase.classList.remove('hidden');
                 sliderRightBase.classList.remove('hidden');
@@ -152,7 +206,7 @@
                 handleSliderEnd('left');
                 handleSliderEnd('right');
             } else {
-                toggleModeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M11.5 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3M9.05 3a2.5 2.5 0 0 1 4.9 0H16v1h-2.05a2.5 2.5 0 0 1-4.9 0H0V3zM4.5 7a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3M2.05 8a2.5 2.5 0 0 1 4.9 0H16v1H6.95a2.5 2.5 0 0 1-4.9 0H0V8zm9.45 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m-2.45 1a2.5 2.5 0 0 1 4.9 0H16v1h-2.05a2.5 2.5 0 0 1-4.9 0H0v-1z"/></svg> 切換雙拉霸';
+                toggleModeBtn.innerHTML = '切換雙拉霸';
                 joystickBase.classList.remove('hidden');
                 sliderLeftBase.classList.add('hidden');
                 sliderRightBase.classList.add('hidden');
@@ -163,15 +217,10 @@
             updateDimensions();
         });
 
-        // ==========================================
-        // 1. 搖桿與拉霸 UI 與座標運算邏輯
-        // ==========================================
         const base = document.getElementById('joystick-base');
         const stick = document.getElementById('joystick-stick');
-        
         const sliderLeftStick = document.getElementById('slider-left-stick');
         const sliderRightStick = document.getElementById('slider-right-stick');
-
         const xValDisplay = document.getElementById('x-val');
         const yValDisplay = document.getElementById('y-val');
         const cmdValDisplay = document.getElementById('cmd-val');
@@ -179,20 +228,16 @@
         let isDraggingJoystick = false;
         let maxDistanceJoystick = 0;
         let maxDistanceSlider = 0;
-
         let leftSliderVal = 0;
         let rightSliderVal = 0;
         
-        // 更新尺寸
         function updateDimensions() {
             maxDistanceJoystick = base.offsetWidth / 2 - stick.offsetWidth / 2;
             maxDistanceSlider = sliderLeftBase.offsetHeight / 2 - sliderLeftStick.offsetHeight / 2;
         }
         window.addEventListener('resize', updateDimensions);
-        // 初始化尺寸 (確保 DOM 渲染後取得正確數值)
         setTimeout(updateDimensions, 100);
 
-        // --- 搖桿邏輯 ---
         const handleJoystickStart = (e) => {
             if (isSliderMode) return;
             isDraggingJoystick = true;
@@ -203,33 +248,24 @@
         const handleJoystickMove = (e) => {
             if (!isDraggingJoystick || isSliderMode) return;
             e.preventDefault(); 
-
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
             const rect = base.getBoundingClientRect();
             const centerX = rect.left + rect.width / 2;
             const centerY = rect.top + rect.height / 2;
-
             let dx = clientX - centerX;
             let dy = clientY - centerY;
-
             const distance = Math.hypot(dx, dy);
             const angle = Math.atan2(dy, dx);
-
             if (distance > maxDistanceJoystick) {
                 dx = Math.cos(angle) * maxDistanceJoystick;
                 dy = Math.sin(angle) * maxDistanceJoystick;
             }
-
             stick.style.transform = `translate(${dx}px, ${dy}px)`;
-
             const mappedX = Math.round((dx / maxDistanceJoystick) * 100);
             const mappedY = Math.round(-(dy / maxDistanceJoystick) * 100);
-
             xValDisplay.innerText = mappedX;
             yValDisplay.innerText = mappedY;
-
             processCommand(mappedX, mappedY);
         };
 
@@ -237,7 +273,6 @@
             isDraggingJoystick = false;
             stick.classList.add('snap-back');
             stick.style.transform = `translate(0px, 0px)`;
-            
             if(!isSliderMode){
                 xValDisplay.innerText = 0;
                 yValDisplay.innerText = 0;
@@ -252,34 +287,25 @@
         document.addEventListener('touchmove', handleJoystickMove, { passive: false });
         document.addEventListener('touchend', handleJoystickEnd);
 
-        // --- 拉霸邏輯 ---
         function setupSlider(baseEl, stickEl, side) {
             let isDraggingSlider = false;
-            
             const handleStart = (e) => {
                 if (!isSliderMode) return;
                 isDraggingSlider = true;
                 stickEl.classList.remove('snap-back');
                 handleMove(e);
             };
-
             const handleMove = (e) => {
                 if (!isDraggingSlider || !isSliderMode) return;
                 e.preventDefault();
-
                 const clientY = e.touches ? e.touches[0].clientY : e.clientY;
                 const rect = baseEl.getBoundingClientRect();
                 const centerY = rect.top + rect.height / 2;
-                
                 let dy = clientY - centerY;
-
                 if (dy > maxDistanceSlider) dy = maxDistanceSlider;
                 if (dy < -maxDistanceSlider) dy = -maxDistanceSlider;
-
                 stickEl.style.transform = `translate(0px, ${dy}px)`;
-
                 const val = Math.round(-(dy / maxDistanceSlider) * 100);
-                
                 if (side === 'left') {
                     leftSliderVal = val;
                     xValDisplay.innerText = val;
@@ -289,7 +315,6 @@
                 }
                 processSliderCommand();
             };
-
             const handleEndLocal = () => {
                 isDraggingSlider = false;
                 stickEl.classList.add('snap-back');
@@ -300,14 +325,12 @@
                     processSliderCommand();
                 }
             };
-            
             stickEl.addEventListener('mousedown', handleStart);
             document.addEventListener('mousemove', handleMove);
             document.addEventListener('mouseup', handleEndLocal);
             stickEl.addEventListener('touchstart', handleStart, { passive: false });
             document.addEventListener('touchmove', handleMove, { passive: false });
             document.addEventListener('touchend', handleEndLocal);
-            
             return handleEndLocal;
         }
 
@@ -319,51 +342,43 @@
             if (side === 'right') handleSliderEndRight();
         }
 
-        // ==========================================
-        // 2. 指令判斷邏輯
-        // ==========================================
-        let lastCommand = 'S'; 
-
+        let lastCommand = '5'; // 預設停止代碼為 5
         function processCommand(x, y) {
-            let cmd = 'S'; 
+            let cmd = '5'; 
             const threshold = 30; 
-
             if (Math.abs(x) < threshold && Math.abs(y) < threshold) {
-                cmd = 'S'; 
+                cmd = '5'; // S
             } else if (y > threshold && Math.abs(y) > Math.abs(x)) {
-                cmd = 'F'; 
+                cmd = '1'; // F
             } else if (y < -threshold && Math.abs(y) > Math.abs(x)) {
-                cmd = 'B'; 
+                cmd = '2'; // B
             } else if (x > threshold && Math.abs(x) > Math.abs(y)) {
-                cmd = 'R'; 
+                cmd = '4'; // R
             } else if (x < -threshold && Math.abs(x) > Math.abs(y)) {
-                cmd = 'L'; 
+                cmd = '3'; // L
             }
-
             if (cmd !== lastCommand) {
-                const cmdMap = { 'F': 'F (前進)', 'B': 'B (後退)', 'L': 'L (左轉)', 'R': 'R (右轉)', 'S': 'S (停止)' };
-                cmdValDisplay.innerText = cmdMap[cmd];
-                sendBluetoothData(cmd); 
+                // UI 介面依然保留好懂的箭頭提示
+                const cmdMap = { '1': 'F (前進)', '2': 'B (後退)', '3': 'L (左轉)', '4': 'R (右轉)', '5': 'S (停止)' };
+                cmdValDisplay.innerText = cmdMap[cmd] || 'S (停止)';
+                sendBluetoothData(cmd); // 傳送純數字
                 lastCommand = cmd;
             }
         }
 
         let lastSliderCmd = '';
         function processSliderCommand() {
-            const cmdStr = `L${leftSliderVal} R${rightSliderVal}`;
+            // 雙拉霸模式：直接傳送 "左速度,右速度"，例如 "80,-40"
+            const cmdStr = `${leftSliderVal},${rightSliderVal}`;
             if (cmdStr !== lastSliderCmd) {
-                cmdValDisplay.innerText = cmdStr;
+                cmdValDisplay.innerText = `L: ${leftSliderVal} R: ${rightSliderVal}`;
                 sendBluetoothData(cmdStr);
                 lastSliderCmd = cmdStr;
             }
         }
 
-        // ==========================================
-        // 3. Web Bluetooth API 連線架構 (自定義 "#" 作為資料邊界符)
-        // ==========================================
         const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
         const UART_TX_CHARACTERISTIC_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; 
-
         let bluetoothDevice = null;
         let txCharacteristic = null;
 
@@ -376,33 +391,25 @@
                 alert('您的瀏覽器不支援 Web Bluetooth API。請使用 Chrome 或 Edge。');
                 return;
             }
-
             if (bluetoothDevice && bluetoothDevice.gatt.connected) {
                 bluetoothDevice.gatt.disconnect();
                 return;
             }
-
             try {
                 btStatus.innerText = '搜尋裝置中...';
                 bluetoothDevice = await navigator.bluetooth.requestDevice({
                     filters: [{ namePrefix: 'BBC micro:bit' }],
                     optionalServices: [UART_SERVICE_UUID]
                 });
-
                 bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
-
                 btStatus.innerText = '連接伺服器...';
                 const server = await bluetoothDevice.gatt.connect();
-
                 btStatus.innerText = '獲取服務...';
                 const service = await server.getPrimaryService(UART_SERVICE_UUID);
-
                 btStatus.innerText = '準備完成...';
                 txCharacteristic = await service.getCharacteristic(UART_TX_CHARACTERISTIC_UUID);
-
                 updateBluetoothUI(true);
-                sendBluetoothData('S');
-
+                sendBluetoothData('5'); // 連線成功先送 5 (停止)
             } catch (error) {
                 console.error("藍牙連線錯誤:", error);
                 btStatus.innerText = '連線失敗或取消';
@@ -419,45 +426,34 @@
 
         function updateBluetoothUI(isConnected) {
             if (isConnected) {
-                btIndicator.classList.remove('bg-red-500', 'shadow-[0_0_8px_#ef4444]');
-                btIndicator.classList.add('bg-green-500', 'shadow-[0_0_8px_#22c55e]');
+                btIndicator.classList.remove('bg-red-500');
+                btIndicator.classList.add('bg-green-500');
                 btStatus.innerText = '已連接 micro:bit';
                 connectBtn.innerHTML = '<span>斷開</span>';
-                connectBtn.classList.replace('bg-blue-600', 'bg-red-600');
-                connectBtn.classList.replace('hover:bg-blue-500', 'hover:bg-red-500');
             } else {
-                btIndicator.classList.add('bg-red-500', 'shadow-[0_0_8px_#ef4444]');
-                btIndicator.classList.remove('bg-green-500', 'shadow-[0_0_8px_#22c55e]');
+                btIndicator.classList.remove('bg-green-500');
+                btIndicator.classList.add('bg-red-500');
                 connectBtn.innerHTML = '<span>連接</span>';
-                connectBtn.classList.replace('bg-red-600', 'bg-blue-600');
-                connectBtn.classList.replace('hover:bg-red-500', 'hover:bg-blue-500');
             }
         }
 
-        // --- 防止同時寫入的發送序列 ---
         let isWriting = false;
         let pendingMessage = null;
 
         async function sendBluetoothData(dataString) {
-            // ⚡ 關鍵修正：不再使用 \r\n，改用極度可靠的 "#" 字元作為一筆資料的結尾
             const cleanData = dataString.trim() + "#"; 
-
             if (!txCharacteristic) {
                 console.log("[藍牙未連接 - 模擬發送]:", cleanData);
                 return;
             }
-
             if (isWriting) {
                 pendingMessage = cleanData;
                 return;
             }
-
             isWriting = true;
             try {
                 const encoder = new TextEncoder();
                 const data = encoder.encode(cleanData);
-
-                // 優先使用不回傳確認的寫入方式，效能最好且絕不卡死
                 if (txCharacteristic.writeValueWithoutResponse) {
                     await txCharacteristic.writeValueWithoutResponse(data);
                 } else {
@@ -476,26 +472,23 @@
             }
         }
 
-        // ==========================================
-        // 4. 右側按鍵邏輯
-        // ==========================================
         const btnA = document.getElementById('btn-a');
         const btnB = document.getElementById('btn-b');
 
         function handleButtonPress(btnName) {
-            cmdValDisplay.innerText = `${btnName} 鍵 (按下)`;
-            sendBluetoothData(`BTN_${btnName}_DOWN`);
+            cmdValDisplay.innerText = `${btnName} 按下`;
+            // A 按下傳送 6，B 按下傳送 8
+            sendBluetoothData(btnName === 'A' ? '6' : '8');
         }
-
         function handleButtonRelease(btnName) {
-            cmdValDisplay.innerText = `${btnName} 鍵 (放開)`;
-            sendBluetoothData(`BTN_${btnName}_UP`);
-            
+            cmdValDisplay.innerText = `${btnName} 放開`;
+            // A 放開傳送 7，B 放開傳送 9
+            sendBluetoothData(btnName === 'A' ? '7' : '9');
             setTimeout(() => {
                 if (isSliderMode) {
-                    cmdValDisplay.innerText = lastSliderCmd || 'L0 R0';
+                    cmdValDisplay.innerText = lastSliderCmd ? `L: ${leftSliderVal} R: ${rightSliderVal}` : '0,0';
                 } else {
-                    const cmdMap = { 'F': 'F (前進)', 'B': 'B (後退)', 'L': 'L (左轉)', 'R': 'R (右轉)', 'S': 'S (停止)' };
+                    const cmdMap = { '1': 'F (前進)', '2': 'B (後退)', '3': 'L (左轉)', '4': 'R (右轉)', '5': 'S (停止)' };
                     cmdValDisplay.innerText = cmdMap[lastCommand] || 'S (停止)';
                 }
             }, 500);
@@ -505,14 +498,11 @@
         btnA.addEventListener('touchstart', (e) => { e.preventDefault(); handleButtonPress('A'); }, { passive: false });
         btnA.addEventListener('mouseup', () => handleButtonRelease('A'));
         btnA.addEventListener('touchend', (e) => { e.preventDefault(); handleButtonRelease('A'); }, { passive: false });
-        btnA.addEventListener('mouseleave', () => { if(cmdValDisplay.innerText.includes('A 鍵 (按下)')) handleButtonRelease('A'); });
 
         btnB.addEventListener('mousedown', () => handleButtonPress('B'));
         btnB.addEventListener('touchstart', (e) => { e.preventDefault(); handleButtonPress('B'); }, { passive: false });
         btnB.addEventListener('mouseup', () => handleButtonRelease('B'));
         btnB.addEventListener('touchend', (e) => { e.preventDefault(); handleButtonRelease('B'); }, { passive: false });
-        btnB.addEventListener('mouseleave', () => { if(cmdValDisplay.innerText.includes('B 鍵 (按下)')) handleButtonRelease('B'); });
-
     </script>
 </body>
 </html>
